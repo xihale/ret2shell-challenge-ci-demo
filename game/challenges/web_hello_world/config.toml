@@ -1,0 +1,10 @@
+name = "Web Hello World"
+tag = [
+  { name = "Web", primary = true },
+  { name = "Easy", primary = false },
+]
+
+[score_rule]
+initial = 1000
+minimum = 100
+decay = 25

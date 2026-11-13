@@ -1,0 +1,7 @@
+{
+  "entrypoint": "exp.py",
+  "protocol": "http",
+  "port": 8080,
+  "flag_regex": "^flag\\{.+\\}$",
+  "description": "Checks greeting on / and retrieves the dynamic FLAG from /flag."
+}

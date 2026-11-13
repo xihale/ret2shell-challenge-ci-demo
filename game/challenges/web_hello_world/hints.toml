@@ -1,0 +1,3 @@
+[[hints]]
+content = "Try requesting `/flag` over HTTP."
+cost = 0
