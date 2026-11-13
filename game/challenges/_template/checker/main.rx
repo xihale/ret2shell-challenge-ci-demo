@@ -1,0 +1,49 @@
+use ret2api::audit;
+use ret2api::utils;
+
+// IMPORTANT: Change `key` and `template` to unique values for each challenge.
+const key = "replace_with_unique_challenge_key";
+const prefix = "flag";
+const template = "replace_with_unique_flag_template_for_this_challenge";
+
+pub async fn check(bucket, user, team, submission) {
+  let flag = utils::Flag::parse(submission.content)?;
+  if flag.prefix() != prefix {
+    return Ok((false, "Incorrect!", None));
+  }
+
+  let enc_id = if let Some(id) = team.id {
+    id
+  } else {
+    user.id
+  };
+
+  let correct_content = audit::encode(template, key, enc_id);
+  if correct_content == flag.content() {
+    return Ok((true, "Correct!", None));
+  }
+
+  let dec_id = audit::decode(template, key, flag.content())?;
+  if let Some(id) = team.id {
+    if dec_id != id {
+      return Ok((false, "Incorrect!", Some(#{
+        peer_team: dec_id,
+        reason: `team ${team.id}:'${team.name}' may cheated with team ${dec_id}`,
+      })));
+    }
+  }
+
+  Ok((false, "Incorrect!", None))
+}
+
+pub async fn environ(bucket, user, team) {
+  let enc_id = if let Some(id) = team.id {
+    id
+  } else {
+    user.id
+  };
+  let content = audit::encode(template, key, enc_id);
+  Ok(#{
+    FLAG: utils::Flag::new().with_prefix(prefix).with_content(content).to_string(),
+  })
+}

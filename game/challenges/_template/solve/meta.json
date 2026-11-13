@@ -1,0 +1,5 @@
+{
+  "entrypoint": "exp.py",
+  "timeout_sec": 30,
+  "flag_regex": "flag\\{[^}]+\\}"
+}

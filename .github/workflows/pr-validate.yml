@@ -1,0 +1,67 @@
+name: PR Validate & Build
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  validate-and-build:
+    name: Validate & Smoke Test
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Collect changed files
+        id: changed
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "${BASE_REF}"
+          mapfile -t FILES < <(git diff --name-only "origin/${BASE_REF}...HEAD")
+          if [ "${#FILES[@]}" -eq 0 ]; then
+            echo "No changed files detected."
+            echo "has_files=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "has_files=true" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "${FILES[@]}" > "$RUNNER_TEMP/changed-files.txt"
+          cat "$RUNNER_TEMP/changed-files.txt"
+
+      - name: Validate schema and PR scope
+        if: steps.changed.outputs.has_files == 'true'
+        run: |
+          set -euo pipefail
+          mapfile -t FILES < "$RUNNER_TEMP/changed-files.txt"
+          python3 scripts/validate.py --root . --changed-files "${FILES[@]}"
+
+      - name: Build image and run local smoke test
+        if: steps.changed.outputs.has_files == 'true'
+        run: |
+          set -euo pipefail
+          SLUGS=$(python3 -c '
+          import pathlib, sys
+          sys.path.insert(0, "scripts")
+          import deploy
+          files = pathlib.Path(sys.argv[1]).read_text().splitlines()
+          for s in deploy.detect_changed_challenges(files):
+              if (pathlib.Path("game/challenges") / s).is_dir():
+                  print(s)
+          ' "$RUNNER_TEMP/changed-files.txt")
+
+          if [ -z "$SLUGS" ]; then
+            echo "No challenge directory modified; skipping build-and-test."
+            exit 0
+          fi
+
+          for slug in $SLUGS; do
+            echo "::group::build-and-test ($slug)"
+            python3 scripts/deploy.py build-and-test --root . --challenge "$slug"
+            echo "::endgroup::"
+          done

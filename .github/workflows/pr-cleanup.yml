@@ -1,0 +1,54 @@
+name: PR Staging Cleanup
+
+on:
+  pull_request_target:
+    types: [closed]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ret2shell-staging
+  cancel-in-progress: false
+
+jobs:
+  cleanup-staging:
+    name: Cleanup Staging Challenge
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout base branch
+        uses: actions/checkout@v4
+
+      - name: Cleanup staging challenge if present
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUM: ${{ github.event.pull_request.number }}
+          RET2SHELL_URL: ${{ secrets.RET2SHELL_URL }}
+          RET2SHELL_USER: ${{ secrets.RET2SHELL_USER }}
+          RET2SHELL_PASS: ${{ secrets.RET2SHELL_PASS }}
+          RET2SHELL_STAGING_GAME_ID: ${{ secrets.RET2SHELL_STAGING_GAME_ID }}
+        run: |
+          set -euo pipefail
+          gh pr view "$PR_NUM" --json files -q '.files[].path' > "$RUNNER_TEMP/pr-files.txt"
+          SLUGS=$(python3 -c '
+          import pathlib, sys
+          sys.path.insert(0, "scripts")
+          import deploy
+          files = pathlib.Path(sys.argv[1]).read_text().splitlines()
+          for s in deploy.detect_changed_challenges(files):
+              print(s)
+          ' "$RUNNER_TEMP/pr-files.txt")
+
+          if [ -z "$SLUGS" ]; then
+            echo "No challenge slug found in PR #${PR_NUM}; nothing to clean up."
+            exit 0
+          fi
+
+          for slug in $SLUGS; do
+            if [[ ! "$slug" =~ ^[a-z]+_[a-z0-9_]+$ ]]; then
+              echo "Skipping invalid challenge slug: $slug" >&2
+              continue
+            fi
+            python3 scripts/deploy.py cleanup-pr --challenge "$slug"
+          done

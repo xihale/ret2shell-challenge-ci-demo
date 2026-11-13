@@ -1,0 +1,48 @@
+name: Production Sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      sync_game_config:
+        description: "Also overwrite production game config.toml from game/config.toml"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ret2shell-prod
+  cancel-in-progress: false
+
+jobs:
+  prod-sync:
+    name: Sync All Challenges to Production
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+
+      - name: Validate all challenges
+        run: |
+          set -euo pipefail
+          python3 scripts/validate.py --root . --all
+
+      - name: Sync challenges to production game
+        env:
+          RET2SHELL_URL: ${{ secrets.RET2SHELL_URL }}
+          RET2SHELL_USER: ${{ secrets.RET2SHELL_USER }}
+          RET2SHELL_PASS: ${{ secrets.RET2SHELL_PASS }}
+          RET2SHELL_PROD_GAME_ID: ${{ secrets.RET2SHELL_PROD_GAME_ID }}
+          RET2SHELL_REGISTRY: ${{ vars.RET2SHELL_REGISTRY || '1.14.133.242:30310' }}
+          SYNC_GAME_CONFIG: ${{ inputs.sync_game_config }}
+        run: |
+          set -euo pipefail
+          ARGS=(prod-sync --root .)
+          if [ "${SYNC_GAME_CONFIG}" = "true" ]; then
+            ARGS+=(--sync-game-config)
+          fi
+          python3 scripts/deploy.py "${ARGS[@]}"

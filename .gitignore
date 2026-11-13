@@ -1,0 +1,19 @@
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+
+# Environment / local secrets
+.env
+*.env
+
+# Build / container archives
+*.tar
+*.tar.gz
+*.tar.zst
+*.tgz
+
+# Generated / temporary outputs
+/r2s-build/
+.DS_Store

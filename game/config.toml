@@ -1,0 +1,15 @@
+name = "Ret2Shell Staging & Challenge Demo"
+updated_at = 1763000000
+brief = "Standardized Ret2Shell challenge repository template"
+register_at = 1763000000
+start_at = 1763086400
+end_at = 1763691200
+archive_at = 1763777600
+host_type = 1 # 0: CTFTraining, 1: CTFGame
+team_size = 4
+can_register_after_started = true
+award_rate = 5
+weight = 0
+
+[access_policy]
+sync = 0 # 0: unrestricted sync, 1: admin sync, 2: no sync

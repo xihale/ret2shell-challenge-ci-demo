@@ -1,0 +1,111 @@
+name: PR Stage Deploy
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: ret2shell-staging
+  cancel-in-progress: false
+
+jobs:
+  stage-deploy:
+    name: Stage PR Challenge
+    if: >-
+      github.event.issue.pull_request &&
+      (startsWith(github.event.comment.body, '/deploy') || startsWith(github.event.comment.body, '/stage')) &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout trusted base branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare trusted scripts and safe PR worktree
+        id: prep
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUM: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/trusted-scripts"
+          cp scripts/validate.py scripts/deploy.py "$RUNNER_TEMP/trusted-scripts/"
+
+          BASE_REF=$(gh pr view "$PR_NUM" --json baseRefName -q '.baseRefName')
+          HEAD_SHA=$(gh pr view "$PR_NUM" --json headRefOid -q '.headRefOid')
+          echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+
+          git fetch --no-tags --force origin "pull/${PR_NUM}/head:pr-${PR_NUM}"
+          ACTUAL_SHA=$(git rev-parse "pr-${PR_NUM}")
+          if [ "$ACTUAL_SHA" != "$HEAD_SHA" ]; then
+            echo "PR head SHA mismatch ($ACTUAL_SHA != $HEAD_SHA)" >&2
+            exit 1
+          fi
+
+          git fetch --no-tags origin "$BASE_REF"
+          mapfile -t FILES < <(git diff --name-only "origin/${BASE_REF}...pr-${PR_NUM}")
+          if [ "${#FILES[@]}" -eq 0 ]; then
+            echo "PR contains no changed files." >&2
+            exit 1
+          fi
+          printf '%s\n' "${FILES[@]}" > "$RUNNER_TEMP/changed-files.txt"
+
+          git worktree prune
+          rm -rf "$RUNNER_TEMP/pr-worktree"
+          git worktree add --detach "$RUNNER_TEMP/pr-worktree" "pr-${PR_NUM}"
+
+          python3 "$RUNNER_TEMP/trusted-scripts/validate.py" \
+            --root "$RUNNER_TEMP/pr-worktree" \
+            --changed-files "${FILES[@]}"
+
+          SLUG=$(python3 -c '
+          import pathlib, sys
+          sys.path.insert(0, sys.argv[1])
+          import deploy
+          files = pathlib.Path(sys.argv[2]).read_text().splitlines()
+          slugs = deploy.detect_changed_challenges(files)
+          if len(slugs) != 1:
+              raise SystemExit(f"Expected exactly 1 changed challenge slug, got: {slugs}")
+          print(slugs[0])
+          ' "$RUNNER_TEMP/trusted-scripts" "$RUNNER_TEMP/changed-files.txt")
+          echo "slug=$SLUG" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy to staging and verify end-to-end
+        id: stage
+        env:
+          RET2SHELL_URL: ${{ secrets.RET2SHELL_URL }}
+          RET2SHELL_USER: ${{ secrets.RET2SHELL_USER }}
+          RET2SHELL_PASS: ${{ secrets.RET2SHELL_PASS }}
+          RET2SHELL_STAGING_GAME_ID: ${{ secrets.RET2SHELL_STAGING_GAME_ID }}
+          RET2SHELL_REGISTRY: ${{ vars.RET2SHELL_REGISTRY || '1.14.133.242:30310' }}
+          PR_NUM: ${{ github.event.issue.number }}
+          SLUG: ${{ steps.prep.outputs.slug }}
+        run: |
+          set -euo pipefail
+          python3 "$RUNNER_TEMP/trusted-scripts/deploy.py" stage-pr \
+            --root "$RUNNER_TEMP/pr-worktree" \
+            --challenge "$SLUG" \
+            --pr "$PR_NUM" \
+            --recreate-on-conflict \
+            --report-file "$RUNNER_TEMP/stage-report.md"
+
+      - name: Post verification report to PR
+        if: always() && steps.prep.outputs.slug != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUM: ${{ github.event.issue.number }}
+          SLUG: ${{ steps.prep.outputs.slug }}
+        run: |
+          set -euo pipefail
+          if [ -f "$RUNNER_TEMP/stage-report.md" ]; then
+            gh pr comment "$PR_NUM" --body-file "$RUNNER_TEMP/stage-report.md"
+          else
+            gh pr comment "$PR_NUM" --body "### ❌ Ret2Shell Staging Verification (FAILED)
+          Staging deployment for \`${SLUG}\` failed before generating a report. Check workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          fi

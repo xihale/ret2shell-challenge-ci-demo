@@ -1,0 +1,4 @@
+# Use `hints = []` if the challenge has no hints (an empty file without `hints` fails TOML decoding).
+[[hints]]
+content = "Replace this with a helpful hint, or set `hints = []`."
+cost = 0
