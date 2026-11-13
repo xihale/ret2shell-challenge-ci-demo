@@ -1,0 +1,15 @@
+FROM docker.io/library/python:3.12-alpine
+
+RUN adduser -D -u 1000 -g 1000 app
+
+WORKDIR /app
+COPY --chown=1000:1000 server.py /app/server.py
+
+ENV FLAG="flag{change_me}" \
+    PORT="8080" \
+    PYTHONDONTWRITEBYTECODE="1"
+
+EXPOSE 8080
+USER 1000:1000
+
+CMD ["python3", "-u", "/app/server.py"]
